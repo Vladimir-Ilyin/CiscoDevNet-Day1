@@ -12,6 +12,7 @@ import filecmp
 import sys
 import os
 import re
+import textfsm
 
 #Module 'Global' variables
 DEVICE_FILE_PATH = 'devices.csv' # file should contain a list of devices in format: ip,username,password,device_type
@@ -223,8 +224,8 @@ def get_version(connection, hostname):
     try:
         # sending a CLI command using Netmiko and printing an output
         connection.enable()
-        output = connection.send_command('sh ver')
-        m = re.search(r'^Cisco IOS.+,.+\((.+)\), Version (.+),.+$', output.splitlines()[1])
+        output = connection.send_command('show version')
+        m = re.search(r'^Cisco IOS.+,.+\((.+)\), Version (.+),.+$', output, flags=re.MULTILINE)
         if m:
             version = m.group(2)
             image = m.group(1)
@@ -251,7 +252,7 @@ def get_platform(connection, hostname):
     try:
         # sending a CLI command using Netmiko and printing an output
         connection.enable()
-        output = connection.send_command('sh inventory')
+        output = connection.send_command('show inventory')
         m = re.search(r'^PID:\s+(\S+)\s+,.+$', output.splitlines()[1])
         if m:
             platform = m.group(1)
@@ -275,16 +276,65 @@ def get_cdp(connection, hostname):
     try:
         # sending a CLI command using Netmiko and printing an output
         connection.enable()
-        output = connection.send_command('sh ver')
-        version = output.splitlines()[1]
+        output = connection.send_command('show cdp')
+        m = re.search(r'CDP is not enabled', output, flags=re.MULTILINE)
+        if m:
+            cdp = 'OFF'
+            peers = 'none'
+        else:
+            cdp = 'ON'
+            output = connection.send_command('show cdp neighbor detail')
+
+            # parse the show cdp details command using TextFSM
+            re_table = textfsm.TextFSM(open("tpl-show-cdp.txt"))
+            fsm_results = re_table.ParseText(output)
+            # check fsm result
+            peers = str(len(fsm_results))
+            #for e in fsm_results:
+            #    print(e)
 
         # creating a backup file and writing command output to it
-        print("Version of " + hostname + " : " + version)
+        print("CDP status on " + hostname + " : " + cdp + ((", neighbor count " + peers) if (cdp == 'ON') else ''))
         print('-*-' * 10)
         print()
 
         # if successfully done
-        return True
+        return { 'cdp': cdp, 'peers': peers }
+
+    except Error:
+        # if there was an error
+        print('Error! Unable send command to device ' + hostname)
+        return False
+
+def set_config(connection, hostname):
+    try:
+        config_commands = get_config_commands_from_file(CONFIG_COMMAND_FILE_PATH)
+
+        # sending a CLI command using Netmiko and printing an output
+        connection.enable()
+
+        output = connection.send_command('ping ' + NTP_IP_ADDRESS)
+        m = re.search(r'Success rate is 100 percent', output, flags=re.MULTILINE)
+        if m:
+            output = connection.send_config_set(config_commands)
+            # save changes
+            output = connection.send_command('wr')
+            output = connection.send_command('show ntp status')
+            n = re.search(r'Clock is synchronized', output, flags=re.MULTILINE)
+            if n:
+                result = 'NTP is sync'
+            else:
+                result = 'NTP not sync'
+        else:
+            result = 'NTP unavaible'
+
+        # creating a backup file and writing command output to it
+        print("NTP status on " + hostname + " : " + result)
+        print('-*-' * 10)
+        print()
+
+        # if successfully done
+        return result
 
     except Error:
         # if there was an error
@@ -306,9 +356,10 @@ def process_target(device,timestamp):
     backup_file_path = get_backup_file_path(device['hostname'], timestamp)
     backup_result = create_backup(connection, backup_file_path, device['hostname'])
     
-    get_version(connection, device['hostname'])
-    get_platform(connection, device['hostname'])
-    print(get_config_commands_from_file(CONFIG_COMMAND_FILE_PATH))
+    version = get_version(connection, device['hostname'])
+    platform = get_platform(connection, device['hostname'])
+    cdp = get_cdp(connection, device['hostname'])
+    ntp = set_config(connection, device['hostname'])
 
     disconnect_from_device(connection, device['hostname'])
 
@@ -323,6 +374,12 @@ def process_target(device,timestamp):
             print('Unable to find previos backup file to find changes.')
             print('-*-' * 10)
             print()
+
+    print('---' * 30)
+    print("{:10} | {:10} | {:30} | {:3} | {:5} | {:5}".format(device['hostname'],platform['platform'],version['image'],version['npe'],(cdp['cdp'] + ((", neighbor count " + cdp['peers']) if (cdp['cdp'] == 'ON') else '')), ntp ))
+    print('---' * 30)
+    print()
+
 
 def main(*args):
     # This is a main function

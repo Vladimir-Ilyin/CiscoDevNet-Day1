@@ -1,4 +1,3 @@
-Value Filldown local_host (\S+)
 Value Required dest_host (\S+)
 Value mgmt_ip (.*)
 Value platform (.*\S)
@@ -8,7 +7,6 @@ Value version (.*)
 Value device_type (.*)
 
 Start
-  ^${local_host}[>#].*
   ^Device ID: ${dest_host}
   ^.*IP address: ${mgmt_ip}
   ^Platform: ${platform}\s*,\s*Capabilities: ${device_type}
