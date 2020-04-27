@@ -11,10 +11,13 @@ import difflib
 import filecmp
 import sys
 import os
+import re
 
 #Module 'Global' variables
 DEVICE_FILE_PATH = 'devices.csv' # file should contain a list of devices in format: ip,username,password,device_type
 BACKUP_DIR_PATH = 'C:\\local\\workspace\\ciscoDevNet\\backups' # complete path to backup directory
+CONFIG_COMMAND_FILE_PATH = 'config.commands.txt' # file should contain a list of config commands, line by line
+NTP_IP_ADDRESS = '192.168.0.1' # local ntp address
 
 def enable_logging():
     # This function enables netmiko logging for reference
@@ -44,6 +47,26 @@ def get_devices_from_file(device_file):
 
     # returning a list of dictionaries
     return device_list
+
+def get_config_commands_from_file(config_commands_file):
+    # This function takes a commands file with config commands and creates a python list of dictionaries out of it
+    # Each disctionary contains information about a single config command
+
+    # creating empty structures
+    commands_list = list()
+
+    # reading a config commands file
+    with open(config_commands_file, 'r') as f:
+        commands_list = [row.strip() for row in f]
+
+    commands_list = [command.replace('$NTP_IP_ADDRESS$', NTP_IP_ADDRESS) for command in commands_list]
+
+    print ("Got config commands from file")
+    print('-*-' * 10)
+    print ()
+
+    # returning a list of commands
+    return commands_list
 
 def get_current_date_and_time():
     # This function returns the current date and time
@@ -132,7 +155,6 @@ def get_previous_backup_file_path(hostname, curent_backup_file_path):
 
     # removing the full path
     current_backup_filename = curent_backup_file_path.split('\\')[-1]
-    print(current_backup_filename)
 
     # creatting an empty dictionary to keep backup file names
     backup_files = {}
@@ -197,6 +219,78 @@ def compare_backup_with_previous_config(previous_backup_file_path, backup_file_p
         print('-*-' * 10)
         print()
 
+def get_version(connection, hostname):
+    try:
+        # sending a CLI command using Netmiko and printing an output
+        connection.enable()
+        output = connection.send_command('sh ver')
+        m = re.search(r'^Cisco IOS.+,.+\((.+)\), Version (.+),.+$', output.splitlines()[1])
+        if m:
+            version = m.group(2)
+            image = m.group(1)
+            n = re.search(r'npe', image)
+            if n:
+                npe = 'NPE'
+            else:
+                npe = 'PE'
+
+        # creating a backup file and writing command output to it
+        print("Version of " + hostname + " : " + version + ', ' + image + ', ' + npe)
+        print('-*-' * 10)
+        print()
+
+        # if successfully done
+        return { 'version': version, 'image': image, 'npe': npe }
+
+    except Error:
+        # if there was an error
+        print('Error! Unable send command to device ' + hostname)
+        return False
+
+def get_platform(connection, hostname):
+    try:
+        # sending a CLI command using Netmiko and printing an output
+        connection.enable()
+        output = connection.send_command('sh inventory')
+        m = re.search(r'^PID:\s+(\S+)\s+,.+$', output.splitlines()[1])
+        if m:
+            platform = m.group(1)
+        else:
+            platform = 'UNDEFINED'
+
+        # creating a backup file and writing command output to it
+        print("Platform of " + hostname + " : " + platform)
+        print('-*-' * 10)
+        print()
+
+        # if successfully done
+        return { 'platform': platform }
+
+    except Error:
+        # if there was an error
+        print('Error! Unable send command to device ' + hostname)
+        return False
+
+def get_cdp(connection, hostname):
+    try:
+        # sending a CLI command using Netmiko and printing an output
+        connection.enable()
+        output = connection.send_command('sh ver')
+        version = output.splitlines()[1]
+
+        # creating a backup file and writing command output to it
+        print("Version of " + hostname + " : " + version)
+        print('-*-' * 10)
+        print()
+
+        # if successfully done
+        return True
+
+    except Error:
+        # if there was an error
+        print('Error! Unable send command to device ' + hostname)
+        return False
+
 def process_target(device,timestamp):
     # This function will be run by each of the processes in parallel
     # This function implements a logic for a single device using other functions defined above:
@@ -212,6 +306,10 @@ def process_target(device,timestamp):
     backup_file_path = get_backup_file_path(device['hostname'], timestamp)
     backup_result = create_backup(connection, backup_file_path, device['hostname'])
     
+    get_version(connection, device['hostname'])
+    get_platform(connection, device['hostname'])
+    print(get_config_commands_from_file(CONFIG_COMMAND_FILE_PATH))
+
     disconnect_from_device(connection, device['hostname'])
 
     # if the script managed to create a backup, then look for a previous one

@@ -1,0 +1,20 @@
+Value Filldown local_host (\S+)
+Value Required dest_host (\S+)
+Value mgmt_ip (.*)
+Value platform (.*\S)
+Value local_port (.*)
+Value remote_port (.*)
+Value version (.*)
+Value device_type (.*)
+
+Start
+  ^${local_host}[>#].*
+  ^Device ID: ${dest_host}
+  ^.*IP address: ${mgmt_ip}
+  ^Platform: ${platform}\s*,\s*Capabilities: ${device_type}
+  ^Interface: ${local_port},  Port ID \(outgoing port\): ${remote_port}
+  ^Version : -> GetVersion
+  ^------ -> Record
+
+GetVersion
+  ^${version} -> Start
