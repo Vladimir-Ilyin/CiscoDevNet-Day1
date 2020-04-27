@@ -3,6 +3,8 @@ DevNet Марафон день 1
 
 За основу взят скрипт Оксаны https://github.com/presidentoksana/devnet_marathon
 
+Скрипт адаптирован для исполнения в среде Windows
+
 В скрипте добавлены функции
 
 ```bash
