@@ -1,0 +1,2 @@
+clock timezone UTC 0 0
+ntp server $NTP_IP_ADDRESS$
